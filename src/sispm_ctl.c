@@ -33,7 +33,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
-#include <usb.h>
+#include <libusb.h>
 #include <assert.h>
 #include "sispm_ctl.h"
 
@@ -42,13 +42,48 @@ extern int verbose;
 
 char serial_id[15];
 
-int get_id( struct usb_device* dev)
-{
-  assert(dev!=0);
-  return dev->descriptor.idProduct;
+char const *usb_strerror(int status) {
+  switch(status) {
+    case LIBUSB_SUCCESS:
+      return "Success";
+    case LIBUSB_ERROR_IO:
+      return "Input/output error";
+    case LIBUSB_ERROR_INVALID_PARAM:
+      return "Invalid parameter";
+    case LIBUSB_ERROR_ACCESS:
+      return "Access denied (insufficient permissions)";
+    case LIBUSB_ERROR_NO_DEVICE:
+      return "No such device (it may have been disconnected)";
+    case LIBUSB_ERROR_NOT_FOUND:
+      return "Entity not found";
+    case LIBUSB_ERROR_BUSY:
+      return "Resource busy";
+    case LIBUSB_ERROR_TIMEOUT:
+      return "Operation timed out";
+    case LIBUSB_ERROR_OVERFLOW:
+      return "Overflow";
+    case LIBUSB_ERROR_PIPE:
+      return "Pipe error";
+    case LIBUSB_ERROR_INTERRUPTED:
+      return "System call interrupted (perhaps due to signal)";
+    case LIBUSB_ERROR_NO_MEM:
+      return "Insufficient memory";
+    case LIBUSB_ERROR_NOT_SUPPORTED:
+      return "Operation not supported or unimplemented on this platform";
+    default:
+      return "Other error";
+  }
 }
 
-int usb_control_msg_tries(usb_dev_handle *dev, int requesttype, int request, int value, int index, char *bytes, int size, int timeout) {
+int get_id( struct libusb_device* dev)
+{
+  assert(dev!=0);
+  struct libusb_device_descriptor descriptor;
+  libusb_get_device_descriptor(dev, &descriptor);
+  return descriptor.idProduct;
+}
+
+int usb_control_msg_tries(libusb_device_handle *dev, int requesttype, int request, int value, int index, char *bytes, int size, int timeout) {
    int ret, i=0;
    do {
       usleep(500*i);
@@ -59,7 +94,7 @@ int usb_control_msg_tries(usb_dev_handle *dev, int requesttype, int request, int
 }
 
 // for identification: reqtype=a1, request=01, b1=0x01, size=5
-char* get_serial(usb_dev_handle *udev)
+char* get_serial(libusb_device_handle *udev)
 {
    int  reqtype=0xa1; //USB_DIR_OUT + USB_TYPE_CLASS + USB_RECIP_INTERFACE /*request type*/,
    int  req=0x01;
@@ -75,8 +110,8 @@ char* get_serial(usb_dev_handle *udev)
                       5000) < 2 )
   {
       fprintf(stderr,"Error performing requested action\n"
-	          "Libusb error string: %s\nTerminating\n",usb_strerror());
-      usb_close (udev);
+	          "Libusb error string: %s\nTerminating\n",usb_strerror(-1));
+      libusb_close (udev);
       exit(-5);
   }
 
@@ -85,7 +120,7 @@ char* get_serial(usb_dev_handle *udev)
   return serial_id;
 }
 
-int usb_command(usb_dev_handle *udev, int b1, int b2, int return_value_expected )
+int usb_command(libusb_device_handle *udev, int b1, int b2, int return_value_expected )
 {
   int  reqtype=0x21; //USB_DIR_OUT + USB_TYPE_CLASS + USB_RECIP_INTERFACE /*request type*/,
   int  req=0x09;
@@ -108,8 +143,8 @@ int usb_command(usb_dev_handle *udev, int b1, int b2, int return_value_expected 
 		       5000) < 2 )
   {
       fprintf(stderr,"Error performing requested action\n"
-	          "Libusb error string: %s\nTerminating\n",usb_strerror());
-      usb_close (udev);
+	          "Libusb error string: %s\nTerminating\n",usb_strerror(-1));
+      libusb_close (udev);
       exit(-5);
   }
 
@@ -117,34 +152,34 @@ int usb_command(usb_dev_handle *udev, int b1, int b2, int return_value_expected 
 }
 
 
-usb_dev_handle* get_handle(struct usb_device*dev)
+libusb_device_handle* get_handle(struct libusb_device*dev)
 {
-    usb_dev_handle *udev=NULL;
+    libusb_device_handle *udev=NULL;
     if( dev==NULL ) return NULL;
-    udev = usb_open( dev );
+    int status = libusb_open( dev, &udev );
 
     /* prepare USB access */
     if (udev == NULL)
     {
-	fprintf(stderr,"Unable to open USB device %s\n",usb_strerror());
-        usb_close (udev);
+	fprintf(stderr,"Unable to open USB device: %s\n",usb_strerror(status));
+        libusb_close (udev);
 	exit(-1);
     }
-    if (usb_set_configuration(udev,1) !=0)
+    if ((status = usb_set_configuration(udev,1)) !=0)
     {
-	fprintf(stderr,"USB set configuration %s\n",usb_strerror());
-        usb_close (udev);
+	fprintf(stderr,"USB set configuration %s\n",usb_strerror(status));
+        libusb_close (udev);
 	exit(-2);
     }
-    if ( usb_claim_interface(udev, 0) !=0)
+    if ( (status = usb_claim_interface(udev, 0)) !=0)
     {
-	fprintf(stderr,"USB claim interface %s\nMaybe device already in use?\n",usb_strerror());
+	fprintf(stderr,"USB claim interface %s\nMaybe device already in use?\n",usb_strerror(status));
 	exit(-3);
     }
-    if (usb_set_altinterface(udev, 0) !=0)
+    if ((status = usb_set_altinterface(udev, 0)) !=0)
     {
-	fprintf(stderr,"USB set alt interface %s\n",usb_strerror());
-        usb_close (udev);
+	fprintf(stderr,"USB set alt interface %s\n",usb_strerror(status));
+        libusb_close (udev);
 	exit(-4);
     }
     return udev;
@@ -174,19 +209,19 @@ int check_outlet_number(int id, int outlet)
   return outlet;
 }
 
-int sispm_switch_on(usb_dev_handle * udev,int id, int outlet)
+int sispm_switch_on(libusb_device_handle * udev,int id, int outlet)
 {
   outlet=check_outlet_number(id,outlet);
   return usb_command( udev, 3*outlet, 0x03, 0 ) ;
 }
 
-int sispm_switch_off(usb_dev_handle * udev,int id, int outlet)
+int sispm_switch_off(libusb_device_handle * udev,int id, int outlet)
 {
   outlet=check_outlet_number(id,outlet);
   return usb_command( udev, 3*outlet, 0x00, 0 );
 }
 
-int sispm_switch_toggle(usb_dev_handle * udev,int id, int outlet)
+int sispm_switch_toggle(libusb_device_handle * udev,int id, int outlet)
 {
   if (sispm_switch_getstatus(udev,id,outlet)==0) //on
     {
@@ -202,7 +237,7 @@ int sispm_switch_toggle(usb_dev_handle * udev,int id, int outlet)
   return 0;
 }
 
-int sispm_switch_getstatus(usb_dev_handle * udev,int id, int outlet)
+int sispm_switch_getstatus(libusb_device_handle * udev,int id, int outlet)
 {
   int result;
   outlet=check_outlet_number(id,outlet);
@@ -210,7 +245,7 @@ int sispm_switch_getstatus(usb_dev_handle * udev,int id, int outlet)
   return result & 1;
 }
 
-int sispm_get_power_supply_status(usb_dev_handle * udev,int id, int outlet)
+int sispm_get_power_supply_status(libusb_device_handle * udev,int id, int outlet)
 {
   int result;
   outlet=check_outlet_number(id,outlet);
@@ -357,7 +392,7 @@ void plannif_scanf(struct plannif* plan, const unsigned char* buffer)
 }
 
 // queries the device, and fills the plannification structure
-void usb_command_getplannif(usb_dev_handle *udev, int socket, struct plannif* plan)
+void usb_command_getplannif(libusb_device_handle *udev, int socket, struct plannif* plan)
 {
   int  reqtype=0x21 | USB_DIR_IN; //USB_DIR_OUT + USB_TYPE_CLASS + USB_RECIP_INTERFACE /*request type*/,
   int  req=0x01;
@@ -373,8 +408,8 @@ void usb_command_getplannif(usb_dev_handle *udev, int socket, struct plannif* pl
 		       5000) < 0x27 )
   {
       fprintf(stderr,"Error performing requested action\n"
-	          "Libusb error string: %s\nTerminating\n",usb_strerror());
-      usb_close (udev);
+	          "Libusb error string: %s\nTerminating\n",usb_strerror(-1));
+      libusb_close (udev);
       exit(-5);
   }
 
@@ -454,7 +489,7 @@ void plannif_printf(const struct plannif* plan, unsigned char* buffer)
 }
 
 // prepares the buffer according to plannif and sends it to the device
-void usb_command_setplannif(usb_dev_handle *udev, struct plannif* plan)
+void usb_command_setplannif(libusb_device_handle *udev, struct plannif* plan)
 {
   int  reqtype=0x21; //USB_DIR_OUT + USB_TYPE_CLASS + USB_RECIP_INTERFACE /*request type*/,
   int  req=0x09;
@@ -482,8 +517,8 @@ void usb_command_setplannif(usb_dev_handle *udev, struct plannif* plan)
 		       5000) < 0x27 )
   {
       fprintf(stderr,"Error performing requested action\n"
-	          "Libusb error string: %s\nTerminating\n",usb_strerror());
-      usb_close (udev);
+	          "Libusb error string: %s\nTerminating\n",usb_strerror(-1));
+      libusb_close (udev);
       exit(-5);
   }
 

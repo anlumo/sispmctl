@@ -40,7 +40,7 @@
 extern int verbose;
 
 const char*answer(char*in);
-void process(int out,char*v,struct usb_device*dev,int devnum);
+void process(int out,char*v,struct libusb_device*dev,int devnum);
 extern int debug;
 
 #endif /* ! MAIN_H */

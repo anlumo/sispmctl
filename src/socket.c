@@ -35,7 +35,7 @@
 #endif
 
 
-#include <usb.h>
+#include <libusb.h>
 #include "socket.h"
 #include "nethelp.h"
 #include "main.h"
@@ -43,7 +43,7 @@
 int listenport=LISTENPORT;
 
 
-void l_listen(int*sock, struct usb_device*dev, int devnum)
+void l_listen(int*sock, struct libusb_device*dev, int devnum)
 {
   int i;
   int s;
